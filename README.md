@@ -20,3 +20,7 @@ A CloudFormation YAML template that provisions a cluster of Kong instances. The 
 
 - ProxyURL - A URL to the Kong Proxy through ELB. You'll want a CNAME pointing to the ELB DNS
 - AdminURL - Access to admin. Only accessible if KongAdminAccessEnabled: true
+
+## Setup
+
+When you first execute the CloudFormation template, make sure you have `RunMigration` enabled which will run key migrations on the Postgres database. You can confirm that everything has run correctly via CloudWatch Logs. Once the process has been complete, you can update the stack and disable `RunMigration`. 

@@ -1,0 +1,1131 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Kong CloudFormation template. Creates load balanced Kong instances (cluster)
+  with Postgres RDS instance in an existing VPC
+Parameters:
+  # Kong Instance Config
+  KongVersion:
+    Description: Kong version (Only 0.11.x and above supported)
+    Type: String
+    Default: 0.13.1
+    AllowedValues:
+    - 0.13.1
+  KongKeyName:
+    Description: Required - Name of an existing EC2 KeyPair to enable SSH access to
+      the instances for Kong
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: ''
+  KongInstanceType:
+    Description: 'Kong EC2 instance type'
+    Type: String
+    Default: c4.large
+    AllowedValues:
+    - t2.small
+    - t2.micro
+    - t2.medium
+    - t2.large
+    - m4.large
+    - m4.xlarge
+    - m4.2xlarge
+    - m4.4xlarge
+    - m4.10xlarge
+    - c4.large
+    - c4.xlarge
+    - c4.xlarge
+    - c4.2xlarge
+    - c4.4xlarge
+    - c4.8xlarge
+    - r3.large
+    - r3.xlarge
+    - r3.2xlarge
+    - r3.4xlarge
+    - r3.8xlarge
+    ConstraintDescription: must be a valid EC2 instance type.
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Required - Existing VPC Subnets where EC2 instances and RDS instances will run. (private)
+    Default: ''
+  SecurityGroupForSSH:
+    Description: Optional - Security group which is allowed SSH access to Kong instances
+    Type: AWS::EC2::SecurityGroup::Id
+
+  # Kong Fleet Config
+  KongFleetMinSize:
+    Description: Min Number of Kong instances
+    Type: Number
+    Default: '1'
+    MinValue: '0'
+  KongFleetMaxSize:
+    Description: Max Number of Kong instances
+    Type: Number
+    Default: '3'
+    MinValue: '1'
+  KongFleetDesiredSize:
+    Description: Desired Number of Kong instances
+    Type: Number
+    Default: '2'
+    MinValue: '0'
+  HardDriveSize:
+    Description: The root volume size in GB for Kong nodes (volume type=gp2)
+    Type: Number
+    Default: '40'
+    MinValue: '20'
+
+  # Kong Database Config
+  DBHost:
+    Description: Optional - The database host dns, leave blank to start a new RDS instance
+    Type: String
+  DBPort:
+    Default: '5432'
+    Description: Conditional - required if DBHost provided. The database port
+    Type: String
+    AllowedPattern: '[0-9]+'
+    ConstraintDescription: must be a valid port number
+  DBName:
+    Default: kong
+    Description: Required - The database name
+    Type: String
+    MinLength: '1'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric
+      characters.
+  DBUsername:
+    Default: kong
+    Description: Required - The database admin account username
+    Type: String
+    MinLength: '1'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric
+      characters.
+  DBPassword:
+    Default: changeit
+    NoEcho: 'true'
+    Description: Required - The database admin account password
+    Type: String
+    MinLength: '8'
+  DBClass:
+    Default: db.m4.large
+    Description: Database instance class
+    Type: String
+    AllowedValues:
+    - db.t2.micro
+    - db.t2.small
+    - db.t2.medium
+    - db.t2.large
+    - db.m4.large
+    - db.m4.xlarge
+    - db.m4.2xlarge
+    - db.m4.4xlarge
+    - db.m4.10xlarge
+    - db.r3.large
+    - db.r3.xlarge
+    - db.r3.2xlarge
+    - db.r3.4xlarge
+    - db.r3.8xlarge
+    - db.r4.large
+    - db.r4.xlarge
+    - db.r4.2xlarge
+    - db.r4.4xlarge
+    - db.r4.8xlarge
+    ConstraintDescription: must select a valid database instance type.
+  DBVersion:
+    Description: Postgres version
+    Type: String
+    Default: 9.6.8
+    AllowedValues:
+    - 10.3
+    - 9.6.8
+    - 9.5.12
+  DBMultiAZ:
+    Default: false
+    Description: 'Allow MultiAZ database deployment '
+    Type: String
+    AllowedValues:
+    - true
+    - false
+  DBStorageType:
+    Description: Storage Type for RDS volume
+    Type: String
+    Default: gp2
+    AllowedValues:
+    - gp2
+    - standard
+  DBAllocatedStorage:
+    Default: '5'
+    Description: The size of the database (Gb)
+    Type: Number
+    MinValue: '5'
+    MaxValue: '6144'
+    ConstraintDescription: must be between 5+
+  DBStorageEncrypted:
+    Default: false
+    Description: Specifies whether the DB instance is encrypted
+    Type: String
+    AllowedValues:
+    - true
+    - false
+  # Migration Config
+  RunMigration:
+    Description: 'Run database migrations (this must be done on a brand new Kong API Gateway), set fleet size to 0'
+    Type: String
+    Default: 'yes'
+    AllowedValues:
+    - 'yes'
+    - 'no'
+  # Load Balancer Config
+  ELBSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Required - Existing Subnets in which ELB instances will run. (public)
+    Default: ''
+  KongProxyAccess:
+    Description: The IP address range that can be used to access the Kong proxy
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 0.0.0.0/0
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  KongAdminAccessEnabled:
+    Default: 'no'
+    Description: Allow public access to Kong Admin
+    Type: String
+    AllowedValues:
+    - 'yes'
+    - 'no'
+  KongAdminPort:
+    Description: The port at which to expose the Kong Admin dashboard
+    Type: String
+    Default: '8080'
+    MinLength: '2'
+    MaxLength: '6'
+    AllowedPattern: (\d{2,6})
+    ConstraintDescription: must be a valid port
+  KongAdminAccess:
+    Description: The IP address range that can be used to access the Kong Admin port (8001)
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 0.0.0.0/0
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  KongAdminAccessSecondary:
+    Description: A secondary IP address range that can be used to access the Kong Admin port
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 0.0.0.0/0
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  # Alarms Configuration
+  MinAvgNetworkCapacity:
+    Type: String
+    Default: 15000000
+    Description: Minimum average network capacity to scale down the kong cluster
+  MaxAvgNetworkCapacity:
+    Type: String
+    Default: 25000000
+    Description: Maximum average network capacity to scale up the kong cluster
+
+  KinesisStackName:
+    Type: String
+    Description: Optional - Name of the CF stack used to create the Kinesis stream. Leave blank to skip filter creation.
+  CloudFormationLogGroup:
+    Description: Name of CloudFormation log group. All cloud-init based logs will be sent here
+    Type: String
+    Default: 'CloudFormation'
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Required - VPC Id of existing VPC
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: "Kong Instance Configuration"
+      Parameters:
+      - KongVersion
+      - KongKeyName
+      - KongInstanceType
+      - SubnetIds
+      - SecurityGroupForSSH
+      - HardDriveSize
+    - Label:
+        default: "Kong Migration Configuration"
+      Parameters:
+      - RunMigration
+    - Label:
+        default: "Kong Fleet Configuration"
+      Parameters:
+      - KongFleetMinSize
+      - KongFleetMaxSize
+      - KongFleetDesiredSize
+    - Label:
+        default: "Kong Postgres Configuration"
+      Parameters:
+      - DBHost
+      - DBPort
+      - DBName
+      - DBUsername
+      - DBPassword
+      - DBClass
+      - DBVersion
+      - DBMultiAZ
+      - DBStorageType
+      - DBAllocatedStorage
+      - DBStorageEncrypted
+    - Label:
+        default: "Load Balancer Configuration"
+      Parameters:
+      - ELBSubnetIds
+      - KongProxyAccess
+      - KongAdminAccessEnabled
+      - KongAdminPort
+      - KongAdminAccess
+      - KongAdminAccessSecondary
+    - Label:
+        default: "Logging"
+      Parameters:
+      - KinesisStackName
+      - CloudFormationLogGroup
+    - Label:
+        default: "Network Configuration"
+      Parameters:
+      - VpcId
+
+    ParameterLabels:
+      VpcId:
+        default: "Which VPC should this be deployed to?"
+      KongAdminAccessEnabled:
+        default: "Enable public access to Kong Admin port?"
+
+Mappings:
+  RegionKongAmiMap:
+    ca-central-1:
+      HVM: ami-e5cc4981
+    us-east-1:
+      HVM: ami-5583d42f
+    us-east-2:
+      HVM: ami-976152f2
+
+Conditions:
+  CreateRDS: !Equals [!Ref 'DBHost', '']
+  CreateAdminIngress: !Equals [!Ref 'KongAdminAccessEnabled', 'yes']
+  CreateSecondaryAdminIngress: !And
+  - !Not [!Equals [!Ref 'KongAdminAccessSecondary', '0.0.0.0/0']]
+  - !Condition CreateAdminIngress
+  CreateSubscriptionFilter: !Not [!Equals [!Ref 'KinesisStackName', '']]
+  AllowSSHAccess: !Not [!Equals [!Ref 'SecurityGroupForSSH', '']]
+  PerformMigration: !Equals [!Ref RunMigration, 'yes']
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 14
+      LogGroupName: !Ref 'AWS::StackName'
+  SubscriptionFilter:
+    Type: AWS::Logs::SubscriptionFilter
+    Condition: CreateSubscriptionFilter
+    DependsOn:
+    - LogGroup
+    Properties:
+      RoleArn: !ImportValue
+        Fn::Sub: ${KinesisStackName}-Role-Arn
+      LogGroupName: !Ref 'LogGroup'
+      FilterPattern: ''
+      DestinationArn: !ImportValue
+        Fn::Sub: ${KinesisStackName}-Stream-Arn
+  KongRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName: root
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            - logs:DescribeLogStreams
+            Resource:
+            - arn:aws:logs:*:*:*
+      - PolicyName: ec2-operations
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - ec2:DescribeTags
+            - cloudwatch:PutMetricData
+            - cloudwatch:GetMetricStatistics
+            - cloudwatch:ListMetrics
+            Resource: '*'
+  KongInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+      - !Ref 'KongRole'
+  # Network Load Balancer
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: 'internet-facing'
+      Subnets: !Ref 'ELBSubnetIds'
+      Type: 'network'
+      Tags:
+      - Key: Name
+        Value: !Sub 'Kong NLB - ${AWS::StackName}'
+  ProxyListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref 'ProxyTargetGroup'
+      LoadBalancerArn: !Ref 'LoadBalancer'
+      Port: '443'
+      Protocol: TCP
+  AdminListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref 'AdminTargetGroup'
+      LoadBalancerArn: !Ref 'LoadBalancer'
+      Port: !Ref 'KongAdminPort'
+      Protocol: TCP
+  ProxyTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${AWS::StackName}-proxy'
+      VpcId: !Ref 'VpcId'
+      Port: 8443
+      Protocol: TCP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: TCP
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+  AdminTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${AWS::StackName}-admin'
+      VpcId: !Ref 'VpcId'
+      Port: 8001
+      Protocol: TCP
+      HealthCheckPort: 8443
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: TCP
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 3
+  KongAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    CreationPolicy:
+      ResourceSignal:
+        Count: !If [PerformMigration, 0, !Ref 'KongFleetDesiredSize']
+        Timeout: PT30M
+    Properties:
+      VPCZoneIdentifier: !Ref 'SubnetIds'
+      LaunchConfigurationName: !Ref 'KongLaunchConfig'
+      MinSize: !If [PerformMigration, 0, !Ref 'KongFleetMinSize']
+      MaxSize: !Ref 'KongFleetMaxSize'
+      DesiredCapacity: !If [PerformMigration, 0, !Ref 'KongFleetDesiredSize']
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 180
+      TargetGroupARNs:
+      - !Ref 'ProxyTargetGroup'
+      - !Ref 'AdminTargetGroup'
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName} - Instance'
+        PropagateAtLaunch: 'true'
+    UpdatePolicy:
+      AutoScalingScheduledAction:
+        IgnoreUnmodifiedGroupSizeProperties: 'true'
+      AutoScalingRollingUpdate:
+        MaxBatchSize: 1
+        MinInstancesInService: 2
+        PauseTime: PT10M
+        WaitOnResourceSignals: true
+  KongMigrationAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier: !Ref 'SubnetIds'
+      LaunchConfigurationName: !Ref 'KongLaunchConfig'
+      MinSize: 0
+      MaxSize: 1
+      DesiredCapacity: !If [PerformMigration, 1, 0]
+      Tags:
+      - Key: Name
+        Value: !Sub '${AWS::StackName} - Migration Node Instance'
+        PropagateAtLaunch: 'true'
+      - Key: MigrationNode
+        Value: 'true'
+        PropagateAtLaunch: 'true'
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT15M
+  ApiGatewayScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      PolicyType: SimpleScaling
+      Cooldown: '300'
+      AutoScalingGroupName: !Ref 'KongAutoScalingGroup'
+      ScalingAdjustment: 2
+  ApiGatewayScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      PolicyType: SimpleScaling
+      Cooldown: '300'
+      AutoScalingGroupName: !Ref 'KongAutoScalingGroup'
+      ScalingAdjustment: -1
+  AverageNetworkInHighThresholdAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmActions:
+      - !Ref 'ApiGatewayScaleUpPolicy'
+      AlarmDescription: Alarm if average NetworkIn is greater than 25,000,000 bytes/minute
+      AlarmName: !Sub '${AWS::StackName}-AverageNetworkInHighThresholdAlarm'
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value: !Ref 'KongAutoScalingGroup'
+      EvaluationPeriods: 1
+      MetricName: NetworkIn
+      Namespace: "AWS/EC2"
+      Period: 60
+      Statistic: Average
+      Threshold: !Ref 'MaxAvgNetworkCapacity'
+  AverageNetworkInLowThresholdAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmActions:
+      - !Ref 'ApiGatewayScaleDownPolicy'
+      AlarmDescription: Alarm if average NetworkIn is lower than 15,000,000 bytes/minute
+      AlarmName:  !Sub '${AWS::StackName}-AverageNetworkInLowThresholdAlarm'
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value: !Ref 'KongAutoScalingGroup'
+      EvaluationPeriods: 10
+      MetricName: NetworkIn
+      Namespace: "AWS/EC2"
+      Period: 60
+      Statistic: Average
+      Threshold: !Ref 'MinAvgNetworkCapacity'
+  KongLaunchConfig:
+    DependsOn:
+    - PostgresDB
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      IamInstanceProfile: !Ref 'KongInstanceProfile'
+      AssociatePublicIpAddress: false
+      ImageId: !FindInMap [RegionKongAmiMap, !Ref 'AWS::Region', HVM]
+      InstanceType: !Ref 'KongInstanceType'
+      KeyName: !Ref 'KongKeyName'
+      BlockDeviceMappings:
+      -
+        DeviceName: '/dev/xvda'
+        Ebs:
+          VolumeSize: !Ref 'HardDriveSize'
+          VolumeType: gp2
+      SecurityGroups:
+      - !Ref 'KongSecurityGroup'
+      UserData:
+        "Fn::Base64": !Sub |
+          #!/bin/bash
+          yum install -y aws-cfn-bootstrap jq
+          export AWS_DEFAULT_REGION=$(curl http://169.254.169.254/latest/meta-data/placement/availability-zone | sed s'/.$//')
+
+          instance_id=$(curl http://169.254.169.254/latest/meta-data/instance-id)
+          tags=$(aws ec2 describe-tags --filters "Name=resource-id,Values=$instance_id")
+          migration_node=$(echo $tags | jq --raw-output '.Tags[] | select(.Key == "MigrationNode") | .Value')
+          echo "migrate=$migration_node" >> /etc/kong-options
+
+          /opt/aws/bin/cfn-init -v --region ${AWS::Region} --stack ${AWS::StackName} --resource KongLaunchConfig --configsets full_install
+          status=$?
+          source /etc/kong-options
+          # Signal the right ASG depending on the type of node (migration or normal fleet)
+          if [ "$migrate" == "true" ]; then
+            /opt/aws/bin/cfn-signal -e $status --region ${AWS::Region} --stack ${AWS::StackName} --resource KongMigrationAutoScalingGroup
+          else
+            /opt/aws/bin/cfn-signal -e $status --region ${AWS::Region} --stack ${AWS::StackName} --resource KongAutoScalingGroup
+          fi
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          full_install:
+          - install_cfn_hooks
+          - install_logging
+          - install_kong
+          - install_monitoring
+        install_cfn_hooks:
+          files:
+            "/etc/cfn/cfn-hup.conf":
+              content: !Sub |
+                [main]
+                stack=${AWS::StackId}
+                region=${AWS::Region}
+              mode: '000400'
+              owner: root
+              group: root
+            "/etc/cfn/hooks.d/cfn-auto-reloader.conf":
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.KongLaunchConfig.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource KongLaunchConfig --configsets full_install
+          services:
+            sysvinit:
+              cfn-hup:
+                enabled: 'true'
+                ensureRunning: 'true'
+                files:
+                - /etc/cfn/cfn-hup.conf
+                - /etc/cfn/hooks.d/cfn-auto-reloader.conf
+        install_monitoring:
+          commands:
+            01_install_disk_mem_monitoring:
+              command: |
+                #!/bin/bash
+
+                yum install perl-Switch perl-DateTime perl-Sys-Syslog perl-LWP-Protocol-https -y
+
+                version=1.2.1
+                archive=CloudWatchMonitoringScripts-$version.zip
+
+                mon_dir=/opt/monitoring
+
+                mkdir -p $mon_dir
+                cd $mon_dir
+                curl http://aws-cloudwatch.s3.amazonaws.com/downloads/$archive -O
+
+                unzip $archive
+                rm $archive
+          files:
+            "/etc/cron.d/metrics":
+              content: !Sub |
+                # Version: 1.1.2-rpm
+                PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+                * * * * * root /opt/monitoring/aws-scripts-mon/mon-put-instance-data.pl --mem-used-incl-cache-buff --mem-util --disk-space-util --disk-path=/ --auto-scaling --from-cron
+
+              mode: '000644'
+              owner: root
+              group: root
+
+        install_logging:
+          # Set up AWS logging for Kong and log any cloud formation events to the CloudFormation log group
+          # Set up log rotation for syslog related log files and nginx access logs
+          # Tweak syslog max message limits to prevent truncation of large log messages
+          packages:
+            yum :
+              awslogs: []
+          files:
+            "/etc/awslogs/awslogs.conf":
+              mode: '000444'
+              owner: root
+              group: root
+              content: !Sub |
+                [general]
+                state_file = /var/awslogs/state/agent-state
+                use_gzip_http_content_encoding = true
+
+                [kong-admin-acc-log]
+                file = /usr/local/kong/logs/admin_access.log
+                log_group_name = ${AWS::StackName}
+                log_stream_name = {instance_id}/admin_access.log
+                datetime_format = %Y-%m-%dT%H:%M:%SZ
+
+                [kong-acc-log]
+                file = /usr/local/kong/logs/access.log
+                log_group_name = ${AWS::StackName}
+                log_stream_name = {instance_id}/access.log
+                datetime_format = %Y-%m-%dT%H:%M:%SZ
+
+                [kong-error-log]
+                file = /usr/local/kong/logs/error.log
+                log_group_name = ${AWS::StackName}
+                log_stream_name = {instance_id}/error.log
+                datetime_format = %Y-%m-%dT%H:%M:%SZ
+
+                [kong-service-log]
+                file = /var/log/kong.log
+                log_group_name = ${AWS::StackName}
+                log_stream_name = {instance_id}/kong.log
+                datetime_format =
+
+                [syslog]
+                file = /var/log/messages
+                log_group_name = ${AWS::StackName}
+                log_stream_name = {instance_id}/syslog
+                datetime_format =
+
+                [/var/log/cloud-init.log]
+                file = /var/log/cloud-init.log
+                log_group_name = ${CloudFormationLogGroup}
+                log_stream_name = {instance_id}/cloud-init.log
+                datetime_format =
+
+                [/var/log/cloud-init-output.log]
+                file = /var/log/cloud-init-output.log
+                log_group_name = ${CloudFormationLogGroup}
+                log_stream_name = {instance_id}/cloud-init-output.log
+                datetime_format =
+
+                [/var/log/cfn-init.log]
+                file = /var/log/cfn-init.log
+                log_group_name = ${CloudFormationLogGroup}
+                log_stream_name = {instance_id}/cfn-init.log
+                datetime_format =
+
+                [/var/log/cfn-init-cmd.log]
+                file = /var/log/cfn-init-cmd.log
+                log_group_name = ${CloudFormationLogGroup}
+                log_stream_name = {instance_id}/cfn-init-cmd.log
+                datetime_format =
+
+                [/var/log/cfn-hup.log]
+                file = /var/log/cfn-hup.log
+                log_group_name = ${CloudFormationLogGroup}
+                log_stream_name = {instance_id}/cfn-hup.log
+                datetime_format =
+
+                [/var/log/cfn-wire.log]
+                file = /var/log/cfn-wire.log
+                log_group_name = ${CloudFormationLogGroup}
+                log_stream_name = {instance_id}/cfn-wire.log
+                datetime_format =
+
+            "/etc/awslogs/awscli.conf":
+              mode: '000444'
+              owner: root
+              group: root
+              content: !Sub |
+                [plugins]
+                cwlogs = cwlogs
+
+                [default]
+                region = ${AWS::Region}
+            "/etc/cron.hourly/logrotate":
+              mode: '000755'
+              owner: root
+              group: root
+              content: |
+                #!/bin/sh
+
+                /usr/sbin/logrotate /etc/logrotate.conf >/dev/null 2>&1
+                EXITVALUE=$?
+                if [ $EXITVALUE != 0 ]; then
+                    /usr/bin/logger -t logrotate "ALERT exited abnormally with [$EXITVALUE]"
+                fi
+                exit 0
+            "/etc/logrotate.d/syslog":
+              mode: '000644'
+              owner: root
+              group: root
+              content: !Sub |
+                /var/log/cron
+                /var/log/maillog
+                /var/log/messages
+                /var/log/secure
+                /var/log/spooler
+                {
+                    missingok
+                    notifempty
+                    size 500M
+                    create 0600 root root
+                    compress
+                    rotate 1
+                    sharedscripts
+                    postrotate
+                    /bin/kill -HUP `cat /var/run/syslogd.pid 2> /dev/null` 2> /dev/null || true
+                    endscript
+                }
+            "/etc/logrotate.d/kong":
+              mode: '000644'
+              owner: root
+              group: root
+              content: |
+                # Version: 1.1.2-rpm
+                /usr/local/kong/logs/access.log
+                /usr/local/kong/logs/admin_access.log
+                /usr/local/kong/logs/error.log
+                {
+                    missingok
+                    notifempty
+                    size 500M
+                    create 0600 root root
+                    compress
+                    rotate 1
+                    postrotate
+                            [ ! -f /usr/local/kong/pids/nginx.pid ] || kill -USR1 `cat /usr/local/kong/pids/nginx.pid`
+                    endscript
+                }
+            "/etc/logrotate.d/awslogs":
+              mode: '000644'
+              owner: root
+              group: root
+              content: |
+                # Version: 1.1.2-rpm
+                /var/log/awslogs.log {
+                    missingok
+                    notifempty
+                    size 100M
+                    create 0600 root root
+                    compress
+                    rotate 2
+                    postrotate
+                	service awslogs condrestart
+                    endscript
+                }
+          commands:
+            01_create_state_directory:
+              command: |
+                #!/bin/bash
+                mkdir -p /var/awslogs/state
+                touch /usr/local/kong/logs/error.log
+                touch /usr/local/kong/logs/admin-access.log
+                touch /usr/local/kong/logs/access.log
+                touch /var/log/kong.log
+            02_tweak_syslog_message_limit:
+              command: |
+                #!/bin/bash
+                # Prepend the lines to /etc/rsyslog.conf
+                echo '# increase maximum allowed log message length to prevent truncation of large messages' > /tmp/rsyslog-temp-file
+                echo '# see http://www.rsyslog.com/doc/v8-stable/configuration/global/index.html for more information' >>  /tmp/rsyslog-temp-file
+                echo '$MaxMessageSize 64k' >> /tmp/rsyslog-temp-file
+                echo '' >> /tmp/rsyslog-temp-file
+                cat /etc/rsyslog.conf >> /tmp/rsyslog-temp-file
+                cp /tmp/rsyslog-temp-file /etc/rsyslog.conf
+
+                # Note: since we use commands to prepend the changes to /etc/rsyslog.conf, CF cannot
+                # detect this properly via services: sysvinit: rsyslog: ...
+                # so we invoke a restart manually
+                service rsyslog restart
+            03_logrotate_hourly:
+              command: |
+                #!/bin/bash
+
+                # Remove logrotate cron from running daily since we set it to run hourly above
+                if [ -f "/etc/cron.daily/logrotate" ]; then
+                  rm /etc/cron.daily/logrotate
+                fi
+            04_logrotate_conf:
+              command: |
+                #!/bin/bash
+
+                # stop suffixing date at end of files
+                sed -i 's/^dateext/#dateext/' /etc/logrotate.conf
+          services:
+            sysvinit:
+              awslogs:
+                enabled: 'true'
+                ensureRunning: 'true'
+                files:
+                - /etc/awslogs/awslogs.conf
+        install_kong:
+          packages:
+            yum:
+              epel-release: []
+          files:
+            "/etc/init.d/kong":
+              mode: '000755'
+              owner: root
+              group: root
+              content: !Sub |
+                #!/bin/sh
+                #
+                # Kong               Start/Stop the Kong
+                #
+                # chkconfig: 2345 95 25
+                # description:      This script is responsible for running Kong
+                #
+                #
+                ### BEGIN INIT INFO
+                # Provides:          kong
+                # Required-Start:    networking
+                # Required-Stop:     networking
+                # Default-Start:
+                # Default-Stop:      0 1 2 3 4 5 6
+                # Short-Description: Kong service
+                # Description:       This script is responsible for running Kong
+
+                ### END INIT INFO
+
+                # Version: 1.1.2-rpm
+
+                NICELEVEL=+4
+
+                export HOME
+
+                # Source function library.
+                . /etc/rc.d/init.d/functions
+
+                prog=kong
+                exec="/usr/local/bin/kong"
+                log="/var/log/kong.log"
+                options="/etc/kong-options"
+
+                source $options
+
+                start() {
+                    if [ $UID -ne 0 ] ; then
+                        echo "Use has insufficient privilege."
+                        exit 4
+                    fi
+                    [ -x $exec ] || exit 5
+                    echo -n $"Starting $prog: "
+
+                    echo -n $"Waiting with random delay before starting node"
+                    sleep `echo $(( RANDOM % ( 120 - 30 + 1 ) + 30 ))`
+
+                    COUNTER=0
+
+                    while [ $COUNTER -lt 4 ]; do
+                        $exec health >> $log
+                        if [[ $? -ne 0 ]]; then
+                            echo "trying to start kong.."
+                            if [ "$migrate" == "true" ]; then
+                              echo "Starting Migration" >> $log
+                              $exec migrations up >> $log
+                              echo "Done migration" >> $log
+                            fi
+                            $exec start >> $log
+                            let COUNTER=COUNTER+1
+                            sleep `echo $(( RANDOM % ( 120 - 30 + 1 ) + 30 ))`
+                        else
+                            break
+                        fi
+                    done
+
+                    if ! $exec health; then
+                        echo -n $"failed to start kong, exiting..."
+                        exit 1;
+                    fi
+
+                    retval=$?
+                    return $retval
+                }
+
+                stop() {
+                    if [ $UID -ne 0 ] ; then
+                        echo "User has insufficient privilege."
+                        exit 4
+                    fi
+                    echo -n $"Stopping $prog: "
+                    su -s /bin/sh -c "$exec stop" ec2-user >> /var/log/kong.log
+                    retval=$?
+                    return $retval
+                }
+
+                restart() {
+                    stop
+                    start
+                }
+
+                rh_status() {
+                    $exec health
+                    retval=$?
+                    return $retval
+                }
+
+                case "$1" in
+
+                    start)
+                        $1
+                        ;;
+                    stop)
+                        $1
+                        ;;
+                    restart)
+                        $1
+                        ;;
+                    status)
+                        rh_status
+                        ;;
+                    *)
+                        echo "Usage: $0 {start|stop|status|restart}"
+                        exit 2
+                        ;;
+                esac
+                exit $?
+            "/etc/kong.conf":
+              mode: '000644'
+              owner: root
+              group: root
+              content: !Sub
+              - |
+                # Database
+                database = postgres
+                pg_host = ${PGHost}
+                pg_port = ${PGPort}
+                pg_database = ${PGDatabase}
+                pg_user = ${PGUser}
+                pg_password = ${PGPassword}
+
+              - PGHost:
+                  Fn::If:
+                  - 'CreateRDS'
+                  - !GetAtt PostgresDB.Endpoint.Address
+                  - !Ref 'DBHost'
+                PGPort:
+                  Fn::If:
+                  - 'CreateRDS'
+                  - !GetAtt PostgresDB.Endpoint.Port
+                  - !Ref 'DBPort'
+                PGDatabase: !Ref 'DBName'
+                PGUser: !Ref 'DBUsername'
+                PGPassword: !Ref 'DBPassword'
+          commands:
+            01_file_limits:
+              command: |
+                #!/bin/bash
+
+                # Set higher ulimit
+                limit=65535
+                limit_file=/etc/security/limits.conf
+
+                echo "fs.file-max = $((limit + 1))" >> /etc/sysctl.conf
+                sysctl -p
+
+                echo "* soft nproc  $limit" >> $limit_file
+                echo "* hard nproc  $limit" >> $limit_file
+                echo "* soft nofile $limit" >> $limit_file
+                echo "* hard nofile $limit" >> $limit_file
+            02_kong:
+              command: !Sub |
+                #!/bin/bash
+                set -e
+
+                kong_version=${KongVersion}
+                wget -O kong.rpm https://bintray.com/kong/kong-community-edition-aws/download_file?file_path=dists%2Fkong-community-edition-$kong_version.aws.rpm
+                yum install -y kong.rpm --nogpgcheck
+          services:
+            sysvinit:
+              kong:
+                enabled: 'true'
+                ensureRunning: 'true'
+                files:
+                - /etc/kong.conf
+                - /etc/kong-options
+                commands:
+                - 02_kong
+
+  KongSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access and HTTP access on the inbound port
+      VpcId: !Ref 'VpcId'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '8443'
+        ToPort: '8443'
+        CidrIp: !Ref 'KongProxyAccess'
+  KongAdminIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: CreateAdminIngress
+    Properties:
+      GroupId: !GetAtt KongSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: '8001'
+      ToPort: '8001'
+      CidrIp: !Ref 'KongAdminAccess'
+  KongAdminIngressSecondary:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: CreateSecondaryAdminIngress
+    Properties:
+      GroupId: !GetAtt KongSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: '8001'
+      ToPort: '8001'
+      CidrIp: !Ref 'KongAdminAccessSecondary'
+
+  KongSSHIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: AllowSSHAccess
+    Properties:
+      GroupId: !GetAtt KongSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: '22'
+      ToPort: '22'
+      SourceSecurityGroupId: !Ref 'SecurityGroupForSSH'
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Condition: CreateRDS
+    Properties:
+      DBSubnetGroupDescription: Subnets available for the RDS DB Instance
+      SubnetIds: !Ref 'SubnetIds'
+  PostgresDB:
+    Type: AWS::RDS::DBInstance
+    Condition: CreateRDS
+    Properties:
+      Engine: postgres
+      DBName: !Ref 'DBName'
+      MasterUsername: !Ref 'DBUsername'
+      DBInstanceClass: !Ref 'DBClass'
+      AllocatedStorage: !Ref 'DBAllocatedStorage'
+      MasterUserPassword: !Ref 'DBPassword'
+      DBSubnetGroupName: !Ref 'DBSubnetGroup'
+      PubliclyAccessible: 'false'
+      EngineVersion: !Ref 'DBVersion'
+      MultiAZ: !Ref 'DBMultiAZ'
+      StorageEncrypted: !Ref 'DBStorageEncrypted'
+      StorageType: !Ref 'DBStorageType'
+      VPCSecurityGroups:
+      - !Ref 'DBSecurityGroup'
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: CreateRDS
+    Properties:
+      GroupDescription: Database security groups
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 5432
+        ToPort: '5432'
+        SourceSecurityGroupId: !Ref 'KongSecurityGroup'
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: '1'
+        ToPort: '65535'
+        CidrIp: 0.0.0.0/0
+      VpcId: !Ref 'VpcId'
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-certificates'
+
+Outputs:
+  ProxyURL:
+    Description: Kong Proxy URL
+    Value: !Join ['', ['https://', !GetAtt [LoadBalancer, DNSName]]]
+  AdminURL:
+    Description: Kong Admin URL
+    Value: !Join ['', ['http://', !GetAtt [LoadBalancer, DNSName], ':', !Ref 'KongAdminPort']]
+  S3CertificateBucket:
+    Value: !Ref 'S3Bucket'
+    Description: URL for the data hosted on S3
+  LoadBalancerHostedZoneId:
+    Description: Kong Load Balancer's Hosted Zone ID
+    Value: !GetAtt LoadBalancer.CanonicalHostedZoneID
+    Export:
+      Name: !Sub '${AWS::StackName}-LoadBalancerHostedZoneId'
+  LoadBalancerDNS:
+    Description: Kong Load Balancer's DNS Name
+    Value: !GetAtt LoadBalancer.DNSName
+    Export:
+      Name: !Sub '${AWS::StackName}-LoadBalancerDNSName'
+

@@ -975,6 +975,8 @@ Resources:
                 pg_database = ${PGDatabase}
                 pg_user = ${PGUser}
                 pg_password = ${PGPassword}
+                # See https://docs.konghq.com/0.13.x/secure-admin-api/#network-layer-access-restrictions
+                admin_listen = 0.0.0.0:8001
 
               - PGHost:
                   Fn::If:

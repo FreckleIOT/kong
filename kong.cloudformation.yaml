@@ -305,6 +305,8 @@ Mappings:
       HVM: ami-5583d42f
     us-east-2:
       HVM: ami-976152f2
+    us-west-2:
+      HVM: ami-f2d3638a
 
 Conditions:
   CreateRDS: !Equals [!Ref 'DBHost', '']

@@ -1024,6 +1024,7 @@ Resources:
               command: !Sub |
                 #!/bin/bash
                 set -e
+                yum install -y git
                 git clone git@github.com:FreckleIOT/aws-lambda-status-code.git
                 cd aws-lambda-status-code
                 luarocks make

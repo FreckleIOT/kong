@@ -978,6 +978,9 @@ Resources:
                 # See https://docs.konghq.com/0.13.x/secure-admin-api/#network-layer-access-restrictions
                 admin_listen = 0.0.0.0:8001
 
+                #Add Status plugin
+                custom_plugins = aws-lambda-status-code
+
               - PGHost:
                   Fn::If:
                   - 'CreateRDS'
@@ -1015,6 +1018,13 @@ Resources:
                 kong_version=${KongVersion}
                 wget -O kong.rpm https://bintray.com/kong/kong-community-edition-aws/download_file?file_path=dists%2Fkong-community-edition-$kong_version.aws.rpm
                 yum install -y kong.rpm --nogpgcheck
+            03_plugin:
+              command: !Sub |
+                #!/bin/bash
+                set -e
+                git clone git@github.com:FreckleIOT/aws-lambda-status-code.git
+                cd aws-lambda-status-code
+                luarocks make
           services:
             sysvinit:
               kong:

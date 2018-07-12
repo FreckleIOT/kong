@@ -1024,10 +1024,34 @@ Resources:
               command: !Sub |
                 #!/bin/bash
                 set -e
+
+                yum install -y openssl-devel  
+                yum install -y openssl
+                
+                yum install -y gcc gcc-c++ kernel-devel     
+                yum install -y readline-devel                          
+
+                wget http://www.lua.org/ftp/lua-5.1.4.tar.gz      
+                tar zxvf lua-5.1.4.tar.gz                                      
+                cd lua-5.1.4                                                        
+                make linux         
+                make install
+
+                wget http://luarocks.github.io/luarocks/releases/luarocks-2.4.4.tar.gz 
+                tar xvzf luarocks-2.4.4.tar.gz
+                cd luarocks-2.4.4
+                ./configure  --with-lua-include=/usr/local/include
+                make build
+                make install
+
                 yum install -y git
-                git clone git@github.com:FreckleIOT/aws-lambda-status-code.git
+                ssh-keyscan -H github.com >> ~/.ssh/known_hosts
+                git clone https://github.com/FreckleIOT/aws-lambda-status-code
                 cd aws-lambda-status-code
-                luarocks make
+                
+                /usr/local/bin/luarocks make
+                /usr/local/bin/luarocks install luacrypto
+
           services:
             sysvinit:
               kong:

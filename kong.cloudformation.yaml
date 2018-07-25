@@ -305,6 +305,8 @@ Mappings:
       HVM: ami-5583d42f
     us-east-2:
       HVM: ami-976152f2
+    us-west-2:
+      HVM: ami-f2d3638a
 
 Conditions:
   CreateRDS: !Equals [!Ref 'DBHost', '']
@@ -978,6 +980,9 @@ Resources:
                 # See https://docs.konghq.com/0.13.x/secure-admin-api/#network-layer-access-restrictions
                 admin_listen = 0.0.0.0:8001
 
+                #Add Status plugin
+                custom_plugins = aws-lambda-status-code
+
               - PGHost:
                   Fn::If:
                   - 'CreateRDS'
@@ -1015,6 +1020,38 @@ Resources:
                 kong_version=${KongVersion}
                 wget -O kong.rpm https://bintray.com/kong/kong-community-edition-aws/download_file?file_path=dists%2Fkong-community-edition-$kong_version.aws.rpm
                 yum install -y kong.rpm --nogpgcheck
+            03_plugin:
+              command: !Sub |
+                #!/bin/bash
+                set -e
+
+                yum install -y openssl-devel  
+                yum install -y openssl
+                
+                yum install -y gcc gcc-c++ kernel-devel     
+                yum install -y readline-devel                          
+
+                wget http://www.lua.org/ftp/lua-5.1.4.tar.gz      
+                tar zxvf lua-5.1.4.tar.gz                                      
+                cd lua-5.1.4                                                        
+                make linux         
+                make install
+
+                wget http://luarocks.github.io/luarocks/releases/luarocks-2.4.4.tar.gz 
+                tar xvzf luarocks-2.4.4.tar.gz
+                cd luarocks-2.4.4
+                ./configure  --with-lua-include=/usr/local/include
+                make build
+                make install
+
+                yum install -y git
+                ssh-keyscan -H github.com >> ~/.ssh/known_hosts
+                git clone https://github.com/FreckleIOT/aws-lambda-status-code
+                cd aws-lambda-status-code
+                
+                /usr/local/bin/luarocks make
+                /usr/local/bin/luarocks install luacrypto
+
           services:
             sysvinit:
               kong:

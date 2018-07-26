@@ -235,6 +235,10 @@ Parameters:
   VpcId:
     Type: AWS::EC2::VPC::Id
     Description: Required - VPC Id of existing VPC
+  VpcCidr:
+    Type: String
+    Description: IP range for the VPC
+    Default: 10.0.0.0/16
 
   CreateS3Bucket:
     Type: String
@@ -1168,6 +1172,14 @@ Resources:
         FromPort: '8443'
         ToPort: '8443'
         CidrIp: !Ref 'KongProxyAccess'
+      - IpProtocol: tcp
+        FromPort: '8443'
+        ToPort: '8443'
+        CidrIp: !Ref 'VpcCidr'
+      - IpProtocol: tcp
+        FromPort: '8001'
+        ToPort: '8001'
+        CidrIp: !Ref 'VpcCidr'
   KongAdminIngress:
     Type: AWS::EC2::SecurityGroupIngress
     Condition: CreateAdminIngress

@@ -77,6 +77,7 @@ Create a JSON configuration file `kong.json`:
 		"CreateS3Bucket": "no",
 		"SetDBInstanceIdentifier": "yes",
 		"ElasticsearchLogsStack": "",
+		"VpcCidr": "10.0.0.0/16",
 		"Organization": "changeme",
 		"Team": "changeme",
 		"Environment": "changeme",

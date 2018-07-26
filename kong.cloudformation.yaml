@@ -252,7 +252,10 @@ Parameters:
     - 'no'
     ConstraintDescription: Must be either yes or no
     Default: 'no'
-
+  ElasticsearchLogsStack:
+    Type: String
+    Description: This will allow creation of a subscription filter that can send logs via a Lambda to Elasticsearch
+    Default: ''
   Organization:
     Type: String
     Description: Organization tag
@@ -365,6 +368,7 @@ Conditions:
   PerformMigration: !Equals [!Ref RunMigration, 'yes']
   PerformS3BucketCreation: !Equals [!Ref CreateS3Bucket, 'yes']
   SetStackNameForDBInstanceIdentifier: !Equals [!Ref SetDBInstanceIdentifier, 'yes']
+  CreateSubscriptionFilterES: !Not [!Equals [!Ref ElasticsearchLogsStack, '']]
 
 Resources:
   LogGroup:
@@ -384,6 +388,17 @@ Resources:
       FilterPattern: ''
       DestinationArn: !ImportValue
         Fn::Sub: ${KinesisStackName}-Stream-Arn
+
+  SubscriptionFilterES:
+    Type: AWS::Logs::SubscriptionFilter
+    Condition: CreateSubscriptionFilterES
+    DependsOn: [LogGroup]
+    Properties:
+      LogGroupName: !Ref LogGroup
+      DestinationArn:
+        Fn::ImportValue: !Sub '${ElasticsearchLogsStack}-LambdaFunctionArn'
+      FilterPattern: ''
+
   KongRole:
     Type: AWS::IAM::Role
     Properties:

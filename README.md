@@ -76,6 +76,7 @@ Create a JSON configuration file `kong.json`:
 		"CloudFormationLogGroup": "api-gateway",
 		"CreateS3Bucket": "no",
 		"SetDBInstanceIdentifier": "yes",
+		"ElasticsearchLogsStack": "",
 		"Organization": "changeme",
 		"Team": "changeme",
 		"Environment": "changeme",
@@ -91,6 +92,8 @@ backwards compatibility for existing Cloudformation Stacks:
 2. SetDBInstanceIdentifier: Changing this might cause things
    to break because it might cause the instance to be recreated and change
    the database endpoints.
+3. ElasticsearchLogsStack: Set this to the stack that has a Lambda that
+   can sink data to Elasticsearch
 
 Set the sensitive password in environment variable.
 ```bash

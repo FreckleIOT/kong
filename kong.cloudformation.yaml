@@ -236,6 +236,45 @@ Parameters:
     Type: AWS::EC2::VPC::Id
     Description: Required - VPC Id of existing VPC
 
+  CreateS3Bucket:
+    Type: String
+    Description: Create an S3 bucket for the certificates and CI/CD
+    AllowedValues:
+    - 'yes'
+    - 'no'
+    ConstraintDescription: Must be either yes or no
+    Default: 'yes'
+  SetDBInstanceIdentifier:
+    Type: String
+    Description: This will use the Stack name for the Database Identifier; otherwise a random string is used.
+    AllowedValues:
+    - 'yes'
+    - 'no'
+    ConstraintDescription: Must be either yes or no
+    Default: 'no'
+
+  Organization:
+    Type: String
+    Description: Organization tag
+    MinLength: 5
+    ConstraintDescription: Must be a string of length >= 5
+  Team:
+    Type: String
+    Description: Team tag
+    MinLength: 5
+    ConstraintDescription: Must be a string of length >= 5
+  Environment:
+    Type: String
+    Description: Team tag
+    AllowedValues: [dev, sandbox, prod, load, test]
+    ConstraintDescription: Must be one of the available environment types
+  Component:
+    Type: String
+    Description: Component tag
+    MinLength: 3
+    ConstraintDescription: Must be a string of length >= 3
+    Default: 'API Gateway'
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -290,6 +329,13 @@ Metadata:
         default: "Network Configuration"
       Parameters:
       - VpcId
+    - Label:
+        default: "Tags"
+      Parameters:
+      - Organization
+      - Team
+      - Environment
+      - Component
 
     ParameterLabels:
       VpcId:
@@ -317,6 +363,8 @@ Conditions:
   CreateSubscriptionFilter: !Not [!Equals [!Ref 'KinesisStackName', '']]
   AllowSSHAccess: !Not [!Equals [!Ref 'SecurityGroupForSSH', '']]
   PerformMigration: !Equals [!Ref RunMigration, 'yes']
+  PerformS3BucketCreation: !Equals [!Ref CreateS3Bucket, 'yes']
+  SetStackNameForDBInstanceIdentifier: !Equals [!Ref SetDBInstanceIdentifier, 'yes']
 
 Resources:
   LogGroup:
@@ -389,6 +437,14 @@ Resources:
       Tags:
       - Key: Name
         Value: !Sub 'Kong NLB - ${AWS::StackName}'
+      - Key: Organization
+        Value: !Ref Organization
+      - Key: Team
+        Value: !Ref Team
+      - Key: Environment
+        Value: !Ref Environment
+      - Key: Component
+        Value: !Ref Component
   ProxyListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -450,7 +506,19 @@ Resources:
       Tags:
       - Key: Name
         Value: !Sub '${AWS::StackName} - Instance'
-        PropagateAtLaunch: 'true'
+        PropagateAtLaunch: true
+      - Key: Organization
+        Value: !Ref Organization
+        PropagateAtLaunch: true
+      - Key: Team
+        Value: !Ref Team
+        PropagateAtLaunch: true
+      - Key: Environment
+        Value: !Ref Environment
+        PropagateAtLaunch: true
+      - Key: Component
+        Value: !Ref Component
+        PropagateAtLaunch: true
     UpdatePolicy:
       AutoScalingScheduledAction:
         IgnoreUnmodifiedGroupSizeProperties: 'true'
@@ -470,10 +538,22 @@ Resources:
       Tags:
       - Key: Name
         Value: !Sub '${AWS::StackName} - Migration Node Instance'
-        PropagateAtLaunch: 'true'
+        PropagateAtLaunch: true
       - Key: MigrationNode
-        Value: 'true'
-        PropagateAtLaunch: 'true'
+        Value: true
+        PropagateAtLaunch: true
+      - Key: Organization
+        Value: !Ref Organization
+        PropagateAtLaunch: true
+      - Key: Team
+        Value: !Ref Team
+        PropagateAtLaunch: true
+      - Key: Environment
+        Value: !Ref Environment
+        PropagateAtLaunch: true
+      - Key: Component
+        Value: !Ref Component
+        PropagateAtLaunch: true
     CreationPolicy:
       ResourceSignal:
         Timeout: PT15M
@@ -1126,6 +1206,7 @@ Resources:
       StorageType: !Ref 'DBStorageType'
       VPCSecurityGroups:
       - !Ref 'DBSecurityGroup'
+      DBInstanceIdentifier: !If [SetStackNameForDBInstanceIdentifier, !Ref 'AWS::StackName', !Ref 'AWS::NoValue']
   DBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Condition: CreateRDS
@@ -1144,6 +1225,7 @@ Resources:
       VpcId: !Ref 'VpcId'
   S3Bucket:
     Type: AWS::S3::Bucket
+    Condition: PerformS3BucketCreation
     Properties:
       BucketName: !Sub '${AWS::StackName}-certificates'
 
@@ -1155,6 +1237,7 @@ Outputs:
     Description: Kong Admin URL
     Value: !Join ['', ['http://', !GetAtt [LoadBalancer, DNSName], ':', !Ref 'KongAdminPort']]
   S3CertificateBucket:
+    Condition: PerformS3BucketCreation
     Value: !Ref 'S3Bucket'
     Description: URL for the data hosted on S3
   LoadBalancerHostedZoneId:

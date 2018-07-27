@@ -31,8 +31,6 @@ residing in the public subnet(s).
 
 - ProxyURL - A URL to the Kong Proxy through ELB. You'll want a CNAME
   pointing to the ELB DNS
-- AdminURL - Access to admin. Only accessible if `KongAdminAccessEnabled`
-  is set to `true`.
 
 ## Setup
 
@@ -57,7 +55,7 @@ Create a JSON configuration file `kong.json`:
 		"KongInstanceType": "m4.large",
 		"SecurityGroupForSSH": "sg-*****************",
 		"KongFleetMinSize": "1",
-		"KongFleetMaxSize": "1",
+		"KongFleetMaxSize": "2",
 		"KongFleetDesiredSize": "1",
 		"HardDriveSize": "50",
 		"DBHost": "",
@@ -70,8 +68,7 @@ Create a JSON configuration file `kong.json`:
 		"DBStorageType": "gp2",
 		"DBAllocatedStorage": "5",
 		"DBStorageEncrypted": "false",
-		"KongProxyAccess": "***.***.***.***/32",
-		"KongAdminAccessEnabled": "no",
+		"KongProxyAccess": "0.0.0.0/0",
 		"KinesisStackName": "",
 		"CloudFormationLogGroup": "api-gateway",
 		"CreateS3Bucket": "no",
@@ -86,17 +83,27 @@ Create a JSON configuration file `kong.json`:
 }
 ```
 
-__NOTE:__ The following parameters have default values to provide
-backwards compatibility for existing Cloudformation Stacks:
-1. CreateS3Bucket: Changing from _yes_ to _no_ will most likely delete
-   the bucket.
-2. SetDBInstanceIdentifier: Changing this might cause things
-   to break because it might cause the instance to be recreated and change
-   the database endpoints.
-3. ElasticsearchLogsStack: Set this to the stack that has a Lambda that
-   can sink data to Elasticsearch
+__NOTES:__
 
-Set the sensitive password in environment variable.
+- The following parameters have default values to provide
+backwards compatibility for existing Cloudformation Stacks:
+  - __CreateS3Bucket__: Changing from _yes_ to _no_ will most likely delete
+    the bucket.
+  - __SetDBInstanceIdentifier__: Changing this might cause things
+    to break because it might cause the instance to be recreated and change
+    the database endpoints.
+  - __ElasticsearchLogsStack__: Set this to the stack that has a Lambda that
+    can sink data to Elasticsearch
+- `KongProxyAccess`=`0.0.0.0/0` allows public access to any API endpoints
+  that you create within Kong.
+  - You can use the `ip-restriction`
+    filter to limit global or per-API access if there is no authentication.
+  - Another approach for a global restriction is to set `KongProxyAccess`
+    to an IP range such as an office's public IP address.
+
+Set the sensitive password in environment variable. Make sure this is
+set, otherwise the `aws deploy` command will think that the password is
+being changed.
 ```bash
 export SENSITIVE_PARAMS='"DBPassword=changeme"'
 ```
@@ -111,3 +118,34 @@ This step will update the stack and start up Kong:
 ```bash
 ./deploy-script kong.cloudformation.yaml dev-api-gateway kong.json no
 ```
+
+## Kong administration
+
+Since there is no public administration endpoint (for security reasons)
+you will need to create an SSH tunnel via a bastion host that has
+`SecurityGroupForSSH`. Find the private IP address of one of the
+Kong instances and then use the script below.
+
+```bash
+bastion_public_ip=changeme
+kong_internal_ip=changeme
+ssh -i path-to-bastion.pem -N -L 8001:${kong_internal_ip}:8001 ec2-user@${bastion_public_ip}
+```
+
+You can use [kong-dashboard](https://github.com/PGBI/kong-dashboard) to
+configure Kong.
+
+To install kong-dashboard:
+
+```bash
+npm install -g kong-dashboard
+```
+
+Now run kong-dashboard:
+
+```
+kong-dashboard start --kong-url http://127.0.0.1:8001 --port 8080
+```
+
+You should be able to access the Kong Dashboard by visiting
+`http://localhost:8080`.

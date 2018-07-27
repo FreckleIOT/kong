@@ -184,13 +184,6 @@ Parameters:
     Default: 0.0.0.0/0
     AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
     ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
-  KongAdminAccessEnabled:
-    Default: 'no'
-    Description: Allow public access to Kong Admin
-    Type: String
-    AllowedValues:
-    - 'yes'
-    - 'no'
   KongAdminPort:
     Description: The port at which to expose the Kong Admin dashboard
     Type: String
@@ -199,22 +192,7 @@ Parameters:
     MaxLength: '6'
     AllowedPattern: (\d{2,6})
     ConstraintDescription: must be a valid port
-  KongAdminAccess:
-    Description: The IP address range that can be used to access the Kong Admin port (8001)
-    Type: String
-    MinLength: '9'
-    MaxLength: '18'
-    Default: 0.0.0.0/0
-    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
-    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
-  KongAdminAccessSecondary:
-    Description: A secondary IP address range that can be used to access the Kong Admin port
-    Type: String
-    MinLength: '9'
-    MaxLength: '18'
-    Default: 0.0.0.0/0
-    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
-    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+
   # Alarms Configuration
   MinAvgNetworkCapacity:
     Type: String
@@ -323,10 +301,7 @@ Metadata:
       Parameters:
       - ELBSubnetIds
       - KongProxyAccess
-      - KongAdminAccessEnabled
       - KongAdminPort
-      - KongAdminAccess
-      - KongAdminAccessSecondary
     - Label:
         default: "Logging"
       Parameters:
@@ -363,10 +338,6 @@ Mappings:
 
 Conditions:
   CreateRDS: !Equals [!Ref 'DBHost', '']
-  CreateAdminIngress: !Equals [!Ref 'KongAdminAccessEnabled', 'yes']
-  CreateSecondaryAdminIngress: !And
-  - !Not [!Equals [!Ref 'KongAdminAccessSecondary', '0.0.0.0/0']]
-  - !Condition CreateAdminIngress
   CreateSubscriptionFilter: !Not [!Equals [!Ref 'KinesisStackName', '']]
   AllowSSHAccess: !Not [!Equals [!Ref 'SecurityGroupForSSH', '']]
   PerformMigration: !Equals [!Ref RunMigration, 'yes']
@@ -375,6 +346,7 @@ Conditions:
   CreateSubscriptionFilterES: !Not [!Equals [!Ref ElasticsearchLogsStack, '']]
 
 Resources:
+  # Logging
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -383,8 +355,7 @@ Resources:
   SubscriptionFilter:
     Type: AWS::Logs::SubscriptionFilter
     Condition: CreateSubscriptionFilter
-    DependsOn:
-    - LogGroup
+    DependsOn: [LogGroup]
     Properties:
       RoleArn: !ImportValue
         Fn::Sub: ${KinesisStackName}-Role-Arn
@@ -392,13 +363,12 @@ Resources:
       FilterPattern: ''
       DestinationArn: !ImportValue
         Fn::Sub: ${KinesisStackName}-Stream-Arn
-
   SubscriptionFilterES:
     Type: AWS::Logs::SubscriptionFilter
     Condition: CreateSubscriptionFilterES
     DependsOn: [LogGroup]
     Properties:
-      LogGroupName: !Ref LogGroup
+      LogGroupName: !Ref 'LogGroup'
       DestinationArn:
         Fn::ImportValue: !Sub '${ElasticsearchLogsStack}-LambdaFunctionArn'
       FilterPattern: ''
@@ -446,6 +416,7 @@ Resources:
       Path: /
       Roles:
       - !Ref 'KongRole'
+
   # Network Load Balancer
   LoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -505,6 +476,7 @@ Resources:
       HealthCheckProtocol: TCP
       HealthyThresholdCount: 3
       UnhealthyThresholdCount: 3
+
   KongAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     CreationPolicy:
@@ -546,6 +518,7 @@ Resources:
         MinInstancesInService: 2
         PauseTime: PT10M
         WaitOnResourceSignals: true
+
   KongMigrationAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
@@ -576,6 +549,7 @@ Resources:
     CreationPolicy:
       ResourceSignal:
         Timeout: PT15M
+
   ApiGatewayScaleUpPolicy:
     Type: AWS::AutoScaling::ScalingPolicy
     Properties:
@@ -592,6 +566,7 @@ Resources:
       Cooldown: '300'
       AutoScalingGroupName: !Ref 'KongAutoScalingGroup'
       ScalingAdjustment: -1
+
   AverageNetworkInHighThresholdAlarm:
     Type: "AWS::CloudWatch::Alarm"
     Properties:
@@ -626,6 +601,7 @@ Resources:
       Period: 60
       Statistic: Average
       Threshold: !Ref 'MinAvgNetworkCapacity'
+
   KongLaunchConfig:
     DependsOn:
     - PostgresDB
@@ -1180,25 +1156,6 @@ Resources:
         FromPort: '8001'
         ToPort: '8001'
         CidrIp: !Ref 'VpcCidr'
-  KongAdminIngress:
-    Type: AWS::EC2::SecurityGroupIngress
-    Condition: CreateAdminIngress
-    Properties:
-      GroupId: !GetAtt KongSecurityGroup.GroupId
-      IpProtocol: tcp
-      FromPort: '8001'
-      ToPort: '8001'
-      CidrIp: !Ref 'KongAdminAccess'
-  KongAdminIngressSecondary:
-    Type: AWS::EC2::SecurityGroupIngress
-    Condition: CreateSecondaryAdminIngress
-    Properties:
-      GroupId: !GetAtt KongSecurityGroup.GroupId
-      IpProtocol: tcp
-      FromPort: '8001'
-      ToPort: '8001'
-      CidrIp: !Ref 'KongAdminAccessSecondary'
-
   KongSSHIngress:
     Type: AWS::EC2::SecurityGroupIngress
     Condition: AllowSSHAccess
@@ -1241,7 +1198,7 @@ Resources:
       GroupDescription: Database security groups
       SecurityGroupIngress:
       - IpProtocol: tcp
-        FromPort: 5432
+        FromPort: '5432'
         ToPort: '5432'
         SourceSecurityGroupId: !Ref 'KongSecurityGroup'
       SecurityGroupEgress:
@@ -1250,6 +1207,7 @@ Resources:
         ToPort: '65535'
         CidrIp: 0.0.0.0/0
       VpcId: !Ref 'VpcId'
+
   S3Bucket:
     Type: AWS::S3::Bucket
     Condition: PerformS3BucketCreation
@@ -1260,9 +1218,6 @@ Outputs:
   ProxyURL:
     Description: Kong Proxy URL
     Value: !Join ['', ['https://', !GetAtt [LoadBalancer, DNSName]]]
-  AdminURL:
-    Description: Kong Admin URL
-    Value: !Join ['', ['http://', !GetAtt [LoadBalancer, DNSName], ':', !Ref 'KongAdminPort']]
   S3CertificateBucket:
     Condition: PerformS3BucketCreation
     Value: !Ref 'S3Bucket'

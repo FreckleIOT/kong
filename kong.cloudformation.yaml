@@ -900,6 +900,9 @@ Resources:
                         $exec health >> $log
                         if [[ $? -ne 0 ]]; then
                             echo "trying to start kong.."
+
+                            prlimit -n65535 -p $$
+
                             if [ "$migrate" == "true" ]; then
                               echo "Starting Migration" >> $log
                               $exec migrations up >> $log

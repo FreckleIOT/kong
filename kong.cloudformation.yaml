@@ -655,13 +655,13 @@ Resources:
                 file = /usr/local/kong/logs/access.log
                 log_group_name = ${AWS::StackName}
                 log_stream_name = {instance_id}/access.log
-                datetime_format = %Y-%m-%dT%H:%M:%SZ
+                datetime_format = %Y-%m-%dT%H:%M:%S %z
 
                 [kong-error-log]
                 file = /usr/local/kong/logs/error.log
                 log_group_name = ${AWS::StackName}
                 log_stream_name = {instance_id}/error.log
-                datetime_format = %Y-%m-%dT%H:%M:%SZ
+                datetime_format = %Y-%m-%dT%H:%M:%S %z
 
                 [kong-service-log]
                 file = /var/log/kong.log
@@ -768,10 +768,11 @@ Resources:
                 {
                     missingok
                     notifempty
-                    size 500M
+                    size 5GB
                     create 0600 root root
                     compress
-                    rotate 1
+                    delaycompress
+                    rotate 4
                     postrotate
                             [ ! -f /usr/local/kong/pids/nginx.pid ] || kill -USR1 `cat /usr/local/kong/pids/nginx.pid`
                     endscript

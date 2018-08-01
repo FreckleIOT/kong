@@ -64,6 +64,11 @@ Parameters:
     Type: Number
     Default: '2'
     MinValue: '0'
+  MaxNumberOfOpenFilesNginx:
+    Description: The maximum number of open files in the system
+    Type: Number
+    Default: '65535'
+    MinValue: '1024'
   HardDriveSize:
     Description: The root volume size in GB for Kong nodes (volume type=gp2)
     Type: Number
@@ -901,7 +906,7 @@ Resources:
                         if [[ $? -ne 0 ]]; then
                             echo "trying to start kong.."
 
-                            prlimit -n65535 -p $$
+                            prlimit -n${MaxNumberOfOpenFilesNginx} -p $$
 
                             if [ "$migrate" == "true" ]; then
                               echo "Starting Migration" >> $log
@@ -1001,11 +1006,11 @@ Resources:
                 PGPassword: !Ref 'DBPassword'
           commands:
             01_file_limits:
-              command: |
+              command: !Sub |
                 #!/bin/bash
 
                 # Set higher ulimit
-                limit=65535
+                limit=${MaxNumberOfOpenFilesNginx}
                 limit_file=/etc/security/limits.conf
 
                 echo "fs.file-max = $((limit + 1))" >> /etc/sysctl.conf

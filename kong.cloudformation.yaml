@@ -730,66 +730,93 @@ Resources:
                 log_group_name = ${AWS::StackName}
                 log_stream_name = {instance_id}/admin_access.log
                 datetime_format = %Y-%m-%dT%H:%M:%SZ
+                buffer_duration = 600000
+                batch_count = 10000
+                batch_size = 1048576
 
                 [kong-acc-log]
                 file = /usr/local/kong/logs/access.log
                 log_group_name = ${AWS::StackName}
                 log_stream_name = {instance_id}/access.log
-                datetime_format = %Y-%m-%dT%H:%M:%SZ
+                datetime_format = %d/%b/%Y:%H:%M:%S %z
 
                 [kong-error-log]
                 file = /usr/local/kong/logs/error.log
                 log_group_name = ${AWS::StackName}
                 log_stream_name = {instance_id}/error.log
-                datetime_format = %Y-%m-%dT%H:%M:%SZ
+                datetime_format = %d/%b/%Y:%H:%M:%S %z
 
                 [kong-service-log]
                 file = /var/log/kong.log
                 log_group_name = ${AWS::StackName}
                 log_stream_name = {instance_id}/kong.log
                 datetime_format =
+                buffer_duration = 600000
+                batch_count = 10000
+                batch_size = 1048576
 
                 [syslog]
                 file = /var/log/messages
                 log_group_name = ${AWS::StackName}
                 log_stream_name = {instance_id}/syslog
                 datetime_format =
+                buffer_duration = 600000
+                batch_count = 10000
+                batch_size = 1048576
 
                 [/var/log/cloud-init.log]
                 file = /var/log/cloud-init.log
                 log_group_name = ${CloudFormationLogGroup}
                 log_stream_name = {instance_id}/cloud-init.log
                 datetime_format =
+                buffer_duration = 600000
+                batch_count = 10000
+                batch_size = 1048576
 
                 [/var/log/cloud-init-output.log]
                 file = /var/log/cloud-init-output.log
                 log_group_name = ${CloudFormationLogGroup}
                 log_stream_name = {instance_id}/cloud-init-output.log
                 datetime_format =
+                buffer_duration = 600000
+                batch_count = 10000
+                batch_size = 1048576
 
                 [/var/log/cfn-init.log]
                 file = /var/log/cfn-init.log
                 log_group_name = ${CloudFormationLogGroup}
                 log_stream_name = {instance_id}/cfn-init.log
                 datetime_format =
+                buffer_duration = 600000
+                batch_count = 10000
+                batch_size = 1048576
 
                 [/var/log/cfn-init-cmd.log]
                 file = /var/log/cfn-init-cmd.log
                 log_group_name = ${CloudFormationLogGroup}
                 log_stream_name = {instance_id}/cfn-init-cmd.log
                 datetime_format =
+                buffer_duration = 600000
+                batch_count = 10000
+                batch_size = 1048576
 
                 [/var/log/cfn-hup.log]
                 file = /var/log/cfn-hup.log
                 log_group_name = ${CloudFormationLogGroup}
                 log_stream_name = {instance_id}/cfn-hup.log
                 datetime_format =
+                buffer_duration = 600000
+                batch_count = 10000
+                batch_size = 1048576
 
                 [/var/log/cfn-wire.log]
                 file = /var/log/cfn-wire.log
                 log_group_name = ${CloudFormationLogGroup}
                 log_stream_name = {instance_id}/cfn-wire.log
                 datetime_format =
+                buffer_duration = 600000
+                batch_count = 10000
+                batch_size = 1048576
 
             "/etc/awslogs/awscli.conf":
               mode: '000444'
@@ -848,10 +875,11 @@ Resources:
                 {
                     missingok
                     notifempty
-                    size 500M
+                    size 1GB
                     create 0600 root root
                     compress
-                    rotate 1
+                    delaycompress
+                    rotate 4
                     postrotate
                             [ ! -f /usr/local/kong/pids/nginx.pid ] || kill -USR1 `cat /usr/local/kong/pids/nginx.pid`
                     endscript
